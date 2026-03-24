@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. TENANT (La empresa o cliente)
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  status    Boolean  @default(true)
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 2. ROLE (Los roles del sistema: Admin, Agente, etc.)
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  users       User[]
+}
+
+// 3. USER (Los usuarios que acceden al sistema)
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // Aquí guardaremos la contraseña encriptada
+  
+  // Relaciones
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  tenantId  String
+  
+  role      Role     @relation(fields: [roleId], references: [id])
+  roleId    String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 4. MENU (Los accesos a la plataforma según el rol)
+model Menu {
+  id        String   @id @default(uuid())
+  name      String   // Ej: "Constructor de Flujos"
+  path      String   // Ej: "/dashboard/flujos"
+  icon      String?
+  isActive  Boolean  @default(true)
+}

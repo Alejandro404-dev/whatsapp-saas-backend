@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "es2022",                                  /* Versión moderna de JavaScript */
+    "module": "commonjs",                                /* El estándar más estable para Node.js */
+    "rootDir": "./src",                                  /* Dónde está nuestro código fuente */
+    "outDir": "./dist",                                  /* Dónde se guardará el código compilado */
+    "esModuleInterop": true,                             /* ¡La magia que arregla tu error de import! */
+    "forceConsistentCasingInFileNames": true,            /* Evita el error de mayúsculas que tuvimos en React */
+    "strict": true,                                      /* Modo estricto activado (como pidió tu primo) */
+    "skipLibCheck": true                                 /* Hace que el servidor compile más rápido */
+  },
+  "include": ["src/**/*"]
+}
