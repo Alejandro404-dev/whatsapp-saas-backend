@@ -26,7 +26,7 @@ app.post('/api/auth/register', async (req, res) => {
         const nuevoUsuario = await prisma.user.create({
             data: {
                 email: email,
-                password: hashedPassword, // <-- Guardamos la versión encriptada, NUNCA la original
+                password: hashedPassword, 
                 tenant: {
                     create: { name: companyName } 
                 },
@@ -104,6 +104,144 @@ app.post('/api/auth/login', async (req, res) => {
         res.status(500).json({ error: "Error interno del servidor" });
     }
 });
+
+// Listar usuarios filtrados por Empresa (Tenant)
+app.get('/api/users/:tenantId', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+
+        const usuarios = await prisma.user.findMany({
+            where: { tenantId: tenantId },
+            include: { role: true } // Traemos el nombre del rol también
+        });
+
+        // Limpiamos los datos sensibles antes de enviarlos al front
+        const usuariosLimpios = usuarios.map(u => ({
+            id: u.id,
+            email: u.email,
+            role: u.role.name,
+            createdAt: u.createdAt
+        }));
+
+        res.json(usuariosLimpios);
+    } catch (error) {
+        res.status(500).json({ error: "No se pudieron obtener los usuarios" });
+    }
+});
+
+// ==========================================
+// ENDPOINT: CREAR NUEVO USUARIO EN UN TENANT
+// ==========================================
+app.post('/api/users', async (req, res) => {
+    try {
+        const { email, password, roleName, tenantId } = req.body;
+
+        // 1. Validamos que el tenant exista por seguridad
+        const tenantExiste = await prisma.tenant.findUnique({ where: { id: tenantId } });
+        if (!tenantExiste) {
+            return res.status(404).json({ error: "La empresa no existe" });
+        }
+
+        // 2. Encriptamos la contraseña del nuevo empleado
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // 3. Creamos al usuario amarrado a la Empresa y buscando o creando su Rol
+        const nuevoEmpleado = await prisma.user.create({
+            data: {
+                email: email,
+                password: hashedPassword,
+                tenant: { connect: { id: tenantId } }, // Lo conectamos a la empresa actual
+                role: {
+                    connectOrCreate: {
+                        where: { name: roleName },
+                        create: { name: roleName, description: `Rol de ${roleName}` }
+                    }
+                }
+            },
+            include: { role: true }
+        });
+
+        // 4. Devolvemos el usuario sin la contraseña por seguridad
+        res.json({
+            id: nuevoEmpleado.id,
+            email: nuevoEmpleado.email,
+            role: nuevoEmpleado.role.name,
+            createdAt: nuevoEmpleado.createdAt
+        });
+
+    } catch (error) {
+        console.error("Error al crear empleado:", error);
+        // Si Prisma lanza error porque el correo ya existe (Unique constraint)
+        res.status(400).json({ error: "El correo ya está en uso o hubo un error en los datos." });
+    }
+});
+
+// ==========================================
+// ENDPOINT: ELIMINAR USUARIO
+// ==========================================
+app.delete('/api/users/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Le decimos a Prisma que borre la fila que coincida con ese ID
+        await prisma.user.delete({
+            where: { id: id }
+        });
+
+        res.json({ message: "Usuario eliminado correctamente" });
+    } catch (error) {
+        console.error("Error al eliminar:", error);
+        res.status(500).json({ error: "No se pudo eliminar el usuario" });
+    }
+});
+
+// ==========================================
+// ENDPOINT: EDITAR USUARIO (La 'U' del CRUD)
+// ==========================================
+app.put('/api/users/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { email, password, roleName } = req.body;
+
+        // 1. Preparamos los datos básicos a actualizar
+        const datosActualizados: any = {
+            email: email,
+            role: {
+                connectOrCreate: {
+                    where: { name: roleName },
+                    create: { name: roleName, description: `Rol de ${roleName}` }
+                }
+            }
+        };
+
+        // 2. Solo encriptamos y cambiamos la contraseña si el administrador escribió una nueva
+        if (password && password.trim() !== "") {
+            datosActualizados.password = await bcrypt.hash(password, 10);
+        }
+
+        // 3. Ejecutamos la actualización en PostgreSQL
+        const usuarioEditado = await prisma.user.update({
+            where: { id: id },
+            data: datosActualizados,
+            include: { role: true }
+        });
+
+        // 4. Devolvemos los datos frescos a React
+        res.json({
+            id: usuarioEditado.id,
+            email: usuarioEditado.email,
+            role: usuarioEditado.role.name,
+            createdAt: usuarioEditado.createdAt
+        });
+
+    } catch (error) {
+        console.error("Error al editar:", error);
+        res.status(500).json({ error: "No se pudo actualizar el usuario." });
+    }
+});
+
+
+
 
 app.listen(PORT, () => {
     console.log(`Servidor API corriendo en http://localhost:${PORT}`);
