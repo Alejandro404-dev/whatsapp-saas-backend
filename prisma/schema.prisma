@@ -13,6 +13,7 @@ model Tenant {
   name      String
   status    Boolean  @default(true)
   users     User[]
+  roles     Role[]   // NUEVO: La empresa ahora es dueña de sus propios roles
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -20,9 +21,19 @@ model Tenant {
 // 2. ROLE (Los roles del sistema: Admin, Agente, etc.)
 model Role {
   id          String   @id @default(uuid())
-  name        String   @unique
+  name        String
   description String?
+  permissions String[] @default([]) // NUEVO: Lista de permisos (Ej: ["ver_dashboard", "crear_flujos"])
+  isSystem    Boolean  @default(false) // NUEVO: Blindaje para SuperAdmin y Admin
+  
+  // Relación con el Tenant
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   users       User[]
+
+  // MAGIA SAAS: El nombre del rol es único, pero SOLO dentro de su misma empresa
+  @@unique([name, tenantId])
 }
 
 // 3. USER (Los usuarios que acceden al sistema)
