@@ -201,16 +201,27 @@ app.post('/api/users', async (req, res) => {
 app.delete('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
+        console.log(`[DELETE] Intentando eliminar usuario con ID: ${id}`);
 
-        // Le decimos a Prisma que borre la fila que coincida con ese ID
+        // 1. Verificamos que el usuario realmente exista antes de intentar borrarlo
+        const usuarioExiste = await prisma.user.findUnique({ where: { id } });
+        
+        if (!usuarioExiste) {
+            console.log("Error: El usuario no existe en la BD.");
+            return res.status(404).json({ error: "El usuario no existe o ya fue eliminado." });
+        }
+
+        // 2. Ejecutamos la eliminación
         await prisma.user.delete({
             where: { id: id }
         });
 
+        console.log("Usuario eliminado con éxito de la BD.");
         res.json({ message: "Usuario eliminado correctamente" });
+
     } catch (error) {
-        console.error("Error al eliminar:", error);
-        res.status(500).json({ error: "No se pudo eliminar el usuario" });
+        console.error("Error interno al eliminar en BD:", error);
+        res.status(500).json({ error: "No se pudo eliminar el usuario por un error en el servidor." });
     }
 });
 
