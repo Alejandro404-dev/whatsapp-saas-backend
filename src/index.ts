@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
-import { prisma } from './prisma'; // Importamos nuestra conexión a la BD
+import { prisma } from './prisma';
 
 dotenv.config();
 
@@ -13,32 +13,28 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// ENDPOINT DE REGISTRO REAL (MULTITENANT + SUPERADMIN)
+// ENDPOINT DE REGISTRO REAL
 // ==========================================
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { companyName, email, password } = req.body;
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Usamos una Transacción: Si algo falla, se cancela todo (no quedan empresas huérfanas)
         const nuevoUsuario = await prisma.$transaction(async (tx) => {
-            // 1. Creamos la Empresa (Tenant)
             const tenant = await tx.tenant.create({
                 data: { name: companyName }
             });
 
-            // 2. Creamos el Rol intocable del sistema para esta empresa
             const rolSuperAdmin = await tx.role.create({
                 data: {
                     name: 'SuperAdmin',
                     description: 'Dueño absoluto del sistema',
-                    permissions: ['ALL'], // Palabra clave de poder absoluto
-                    isSystem: true,       // Nadie lo puede borrar o editar
+                    permissions: ['ALL'],
+                    isSystem: true,
                     tenantId: tenant.id
                 }
             });
 
-            // 3. Creamos al usuario y le damos las llaves
             const user = await tx.user.create({
                 data: {
                     email: email,
@@ -72,7 +68,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // ==========================================
-// ENDPOINT DE LOGIN REAL (CON VERIFICACIÓN)
+// ENDPOINT DE LOGIN REAL
 // ==========================================
 app.post('/api/auth/login', async (req, res) => {
     try {
@@ -80,21 +76,21 @@ app.post('/api/auth/login', async (req, res) => {
 
         const usuarioEncontrado = await prisma.user.findUnique({
             where: { email: email },
-            include: {
-                tenant: true,
-                role: true
-            }
+            include: { tenant: true, role: true }
         });
 
         if (!usuarioEncontrado) {
-            return res.status(401).json({ error: "El correo o contraseña está mal, verificar los datos ingresados" });
+            return res.status(401).json({ error: "El correo o contraseña está mal" });
         }
 
-        // 3. Comparamos la contraseña que escribió el usuario con el hash guardado en PostgreSQL
         const isPasswordValid = await bcrypt.compare(password, usuarioEncontrado.password);
 
-        if (!isPasswordValid) { // <-- Usamos la validación segura aquí
-            return res.status(401).json({ error: "El correo o contraseña está mal, verificar los datos ingresados" });
+        if (!isPasswordValid) { 
+            return res.status(401).json({ error: "El correo o contraseña está mal" });
+        }
+
+        if (!usuarioEncontrado.isActive) {
+            return res.status(403).json({ error: "Tu cuenta ha sido bloqueada. Contacta al administrador." });
         }
 
         res.json({
@@ -116,7 +112,9 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// Listar usuarios filtrados por Empresa (Tenant)
+// ==========================================
+// ENDPOINT: OBTENER TODOS LOS USUARIOS
+// ==========================================
 app.get('/api/users/:tenantId', async (req, res) => {
     try {
         const { tenantId } = req.params;
@@ -130,7 +128,8 @@ app.get('/api/users/:tenantId', async (req, res) => {
             email: u.email,
             role: u.role.name,
             accesos: u.role.permissions,
-            createdAt: u.createdAt
+            createdAt: u.createdAt,
+            isActive: u.isActive 
         }));
 
         res.json(usuariosLimpios);
@@ -140,43 +139,29 @@ app.get('/api/users/:tenantId', async (req, res) => {
 });
 
 // ==========================================
-// ENDPOINT: CREAR NUEVO USUARIO EN UN TENANT
+// ENDPOINT: CREAR NUEVO USUARIO
 // ==========================================
 app.post('/api/users', async (req, res) => {
     try {
         const { email, password, roleName, tenantId } = req.body;
 
-        // 1. Validamos que el tenant exista
         const tenantExiste = await prisma.tenant.findUnique({ where: { id: tenantId } });
-        if (!tenantExiste) {
-            return res.status(404).json({ error: "La empresa no existe" });
-        }
+        if (!tenantExiste) return res.status(404).json({ error: "La empresa no existe" });
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // 2. Buscamos o creamos el Rol usando la Llave Compuesta (nombre + empresa)
         const rolAsignado = await prisma.role.upsert({
-            where: {
-                name_tenantId: {
-                    name: roleName,
-                    tenantId: tenantId
-                }
-            },
-            update: {}, // Si existe, no le hacemos nada
-            create: {
-                name: roleName,
-                description: `Rol de ${roleName}`,
-                tenantId: tenantId
-            }
+            where: { name_tenantId: { name: roleName, tenantId: tenantId } },
+            update: {},
+            create: { name: roleName, description: `Rol de ${roleName}`, tenantId: tenantId }
         });
 
-        // 3. Creamos al usuario pasándole directamente los IDs
         const nuevoEmpleado = await prisma.user.create({
             data: {
                 email: email,
                 password: hashedPassword,
                 tenantId: tenantId,
-                roleId: rolAsignado.id // Usamos el ID del rol que acabamos de asegurar
+                roleId: rolAsignado.id
             },
             include: { role: true }
         });
@@ -190,8 +175,7 @@ app.post('/api/users', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error al crear empleado:", error);
-        res.status(400).json({ error: "El correo ya está en uso o hubo un error en los datos." });
+        res.status(400).json({ error: "El correo ya está en uso o hubo un error." });
     }
 });
 
@@ -201,70 +185,41 @@ app.post('/api/users', async (req, res) => {
 app.delete('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        console.log(`[DELETE] Intentando eliminar usuario con ID: ${id}`);
-
-        // 1. Verificamos que el usuario realmente exista antes de intentar borrarlo
         const usuarioExiste = await prisma.user.findUnique({ where: { id } });
         
-        if (!usuarioExiste) {
-            console.log("Error: El usuario no existe en la BD.");
-            return res.status(404).json({ error: "El usuario no existe o ya fue eliminado." });
-        }
+        if (!usuarioExiste) return res.status(404).json({ error: "El usuario no existe." });
 
-        // 2. Ejecutamos la eliminación
-        await prisma.user.delete({
-            where: { id: id }
-        });
-
-        console.log("Usuario eliminado con éxito de la BD.");
+        await prisma.user.delete({ where: { id: id } });
         res.json({ message: "Usuario eliminado correctamente" });
 
     } catch (error) {
-        console.error("Error interno al eliminar en BD:", error);
-        res.status(500).json({ error: "No se pudo eliminar el usuario por un error en el servidor." });
+        res.status(500).json({ error: "No se pudo eliminar el usuario." });
     }
 });
 
 // ==========================================
-// ENDPOINT: EDITAR USUARIO (La 'U' del CRUD)
+// ENDPOINT: EDITAR USUARIO
 // ==========================================
 app.put('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const { email, password, roleName } = req.body;
 
-        // 1. Sacamos los datos actuales del usuario para saber en qué empresa está
         const usuarioActual = await prisma.user.findUnique({ where: { id } });
         if (!usuarioActual) return res.status(404).json({ error: "Usuario no encontrado" });
 
-        // 2. Buscamos o creamos el nuevo Rol en su misma empresa
         const rolAsignado = await prisma.role.upsert({
-            where: {
-                name_tenantId: {
-                    name: roleName,
-                    tenantId: usuarioActual.tenantId
-                }
-            },
+            where: { name_tenantId: { name: roleName, tenantId: usuarioActual.tenantId } },
             update: {},
-            create: {
-                name: roleName,
-                description: `Rol de ${roleName}`,
-                tenantId: usuarioActual.tenantId
-            }
+            create: { name: roleName, description: `Rol de ${roleName}`, tenantId: usuarioActual.tenantId }
         });
 
-        // 3. Preparamos los datos básicos a actualizar
-        const datosActualizados: any = {
-            email: email,
-            roleId: rolAsignado.id // Actualizamos su rol
-        };
+        const datosActualizados: any = { email: email, roleId: rolAsignado.id };
 
-        // 4. Solo encriptamos si nos mandaron una contraseña nueva
         if (password && password.trim() !== "") {
             datosActualizados.password = await bcrypt.hash(password, 10);
         }
 
-        // 5. Ejecutamos la actualización
         const usuarioEditado = await prisma.user.update({
             where: { id: id },
             data: datosActualizados,
@@ -275,14 +230,35 @@ app.put('/api/users/:id', async (req, res) => {
             id: usuarioEditado.id,
             email: usuarioEditado.email,
             role: usuarioEditado.role.name,
-            accesos: usuarioEditado.role.permissions, // <--- AGREGAR ESTA LÍNEA
+            accesos: usuarioEditado.role.permissions,
+            isActive: usuarioEditado.isActive, 
             createdAt: usuarioEditado.createdAt
         });
 
+    } catch (error) {
+        res.status(500).json({ error: "No se pudo actualizar el usuario." });
+    }
+});
+
+// ==========================================
+// ENDPOINT: ACTIVAR/DESACTIVAR USUARIO (BLOQUEO)
+// ==========================================
+app.patch('/api/users/:id/toggle-status', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const usuario = await prisma.user.findUnique({ where: { id } });
+        
+        if (!usuario) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        const usuarioActualizado = await prisma.user.update({
+            where: { id },
+            data: { isActive: !usuario.isActive }
+        });
+        
+        res.json({ id: usuarioActualizado.id, isActive: usuarioActualizado.isActive });
 
     } catch (error) {
-        console.error("Error al editar:", error);
-        res.status(500).json({ error: "No se pudo actualizar el usuario." });
+        res.status(500).json({ error: "No se pudo cambiar el estado del usuario" });
     }
 });
 
@@ -290,7 +266,7 @@ app.put('/api/users/:id', async (req, res) => {
 // ENDPOINTS: GESTIÓN DE ROLES Y PERMISOS
 // ==========================================
 
-// Obtener todos los roles de una Empresa
+// Obtener todos los roles de una Empresa (ESTE ERA EL QUE FALTABA)
 app.get('/api/roles/:tenantId', async (req, res) => {
     try {
         const { tenantId } = req.params;
@@ -299,7 +275,6 @@ app.get('/api/roles/:tenantId', async (req, res) => {
             include: { _count: { select: { users: true } } }
         });
 
-        // Formateamos para el frontend
         const rolesMapeados = roles.map(r => ({
             id: r.id,
             nombre: r.name,
@@ -315,22 +290,21 @@ app.get('/api/roles/:tenantId', async (req, res) => {
     }
 });
 
-// Crear un nuevo Rol (Solo Admins)
+// Crear un nuevo Rol
 app.post('/api/roles', async (req, res) => {
     try {
         const { nombre, permisos, tenantId } = req.body;
-
         const nuevoRol = await prisma.role.create({
             data: {
                 name: nombre,
                 permissions: permisos,
-                isSystem: false, // Los creados a mano nunca son protegidos
+                isSystem: false,
                 tenantId: tenantId
             }
         });
         res.json(nuevoRol);
     } catch (error) {
-        res.status(400).json({ error: "Ya existe un rol con ese nombre en tu empresa." });
+        res.status(400).json({ error: "Ya existe un rol con ese nombre." });
     }
 });
 
@@ -343,9 +317,7 @@ app.put('/api/roles/:id', async (req, res) => {
         const rolActual = await prisma.role.findUnique({ where: { id } });
 
         if (!rolActual) return res.status(404).json({ error: "Rol no encontrado" });
-        if (rolActual.isSystem) {
-            return res.status(403).json({ error: "Seguridad: No puedes alterar los permisos de un rol del sistema." });
-        }
+        if (rolActual.isSystem) return res.status(403).json({ error: "Seguridad: No puedes alterar un rol del sistema." });
 
         const rolEditado = await prisma.role.update({
             where: { id },
@@ -370,7 +342,7 @@ app.delete('/api/roles/:id', async (req, res) => {
 
         if (!rolActual) return res.status(404).json({ error: "Rol no encontrado" });
         if (rolActual.isSystem) return res.status(403).json({ error: "Seguridad: No puedes borrar un rol del sistema." });
-        if (rolActual._count.users > 0) return res.status(400).json({ error: "No puedes borrar un rol que está siendo usado por empleados." });
+        if (rolActual._count.users > 0) return res.status(400).json({ error: "No puedes borrar un rol en uso." });
 
         await prisma.role.delete({ where: { id } });
         res.json({ message: "Rol eliminado correctamente" });
@@ -378,9 +350,6 @@ app.delete('/api/roles/:id', async (req, res) => {
         res.status(500).json({ error: "Error al eliminar el rol" });
     }
 });
-
-
-
 
 app.listen(PORT, () => {
     console.log(`Servidor API corriendo en http://localhost:${PORT}`);
