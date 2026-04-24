@@ -340,6 +340,65 @@ app.delete('/api/roles/:id', async (req, res) => {
     }
 });
 
+// ==========================================
+// 6. ENDPOINTS: CAMPAÑAS MASIVAS
+// ==========================================
+
+// Obtener todas las campañas de una empresa
+app.get('/api/campaigns/:tenantId', async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const campanas = await prisma.campaign.findMany({
+            where: { tenantId: tenantId },
+            orderBy: { createdAt: 'desc' } // Las más nuevas primero
+        });
+        res.json(campanas);
+    } catch (error) {
+        console.error("Error al obtener campañas:", error);
+        res.status(500).json({ error: "Error al obtener las campañas" });
+    }
+});
+
+// Crear una nueva campaña
+app.post('/api/campaigns', async (req, res) => {
+    try {
+        const { name, message, startDate, endDate, tenantId, totalContacts } = req.body;
+
+        if (!tenantId) return res.status(400).json({ error: "Falta el ID de la empresa." });
+
+        const nuevaCampana = await prisma.campaign.create({
+            data: {
+                name: name,
+                description: message, 
+                startDate: new Date(startDate + "T00:00:00"),
+                endDate: new Date(endDate + "T00:00:00"),
+                status: "ACTIVA",
+                tenantId: tenantId
+            }
+        });
+
+        console.log(`Simulando envío a ${totalContacts} contactos...`);
+
+        res.json({
+            mensaje: "Campaña encolada con éxito",
+            campana: nuevaCampana
+        });
+
+    } catch (error) {
+        console.error("Error al crear campaña:", error);
+        res.status(500).json({ error: "No se pudo crear la campaña." });
+    }
+});
+
+
+
+
+
+// ==========================================
+// ARRANCAR EL SERVIDOR 
+// ==========================================
+
+console.log(" ¡ATENCIÓN: EL BACKEND NUEVO DE CAMPAÑAS ESTÁ CARGANDO! ESTO PUEDE TARDAR UNOS SEGUNDOS...");
 app.listen(PORT, () => {
     console.log(`Servidor API corriendo en http://localhost:${PORT}`);
 });
