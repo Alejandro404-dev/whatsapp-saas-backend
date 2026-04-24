@@ -13,7 +13,11 @@ model Tenant {
   name      String
   status    Boolean  @default(true)
   users     User[]
-  roles     Role[]   // NUEVO: La empresa ahora es dueña de sus propios roles
+  roles     Role[]   
+  
+
+  campaigns Campaign[] 
+  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -23,8 +27,8 @@ model Role {
   id          String   @id @default(uuid())
   name        String
   description String?
-  permissions String[] @default([]) // NUEVO: Lista de permisos (Ej: ["ver_dashboard", "crear_flujos"])
-  isSystem    Boolean  @default(false) // NUEVO: Blindaje para SuperAdmin y Admin
+  permissions String[] @default([]) 
+  isSystem    Boolean  @default(false) 
   
   // Relación con el Tenant
   tenantId    String
@@ -32,34 +36,60 @@ model Role {
   
   users       User[]
 
-  // MAGIA SAAS: El nombre del rol es único, pero SOLO dentro de su misma empresa
+  // El nombre del rol es único por empresa
   @@unique([name, tenantId])
 }
 
 // 3. USER (Los usuarios que acceden al sistema)
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String   // Aquí guardaremos la contraseña encriptada
+  id                    String   @id @default(uuid())
+  email                 String   @unique
+  password              String   
   
   // Relaciones
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  tenantId  String
+  tenant                Tenant   @relation(fields: [tenantId], references: [id])
+  tenantId              String
   
-  role      Role     @relation(fields: [roleId], references: [id])
-  roleId    String
+  role                  Role     @relation(fields: [roleId], references: [id])
+  roleId                String
 
-  isActive  Boolean  @default(true) // NUEVO: Control de bloqueo de acceso
+  isActive              Boolean  @default(true) 
+  
+  // ==========================================
+  // NUEVO: FLAG DE SEGURIDAD
+  // ==========================================
+  requirePasswordChange Boolean  @default(false) 
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 // 4. MENU (Los accesos a la plataforma según el rol)
 model Menu {
   id        String   @id @default(uuid())
-  name      String   // Ej: "Constructor de Flujos"
-  path      String   // Ej: "/dashboard/flujos"
+  name      String   
+  path      String   
   icon      String?
   isActive  Boolean  @default(true)
+}
+
+// 5. CICLO DE VIDA DE CAMPAIGN 
+model Campaign {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  
+  // Rango de fechas
+  startDate   DateTime
+  endDate     DateTime
+  
+  // Estado para saber si está activa, pausada o expirada
+  status      String   @default("ACTIVA") // Ej: "ACTIVA", "EXPIRADA", "PAUSADA"
+  
+  // Relación obligatoria con la empresa (Tenant)
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
